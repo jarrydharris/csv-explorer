@@ -1,9 +1,10 @@
 from typing import Iterable, Optional
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Header, DirectoryTree, DataTable, Static
+from textual.widgets import Header, DirectoryTree, DataTable, ListView, ListItem, Label
 from pathlib import Path
-from textual import log
+import duckdb
+from datetime import datetime
 
 
 class CsvDirectoryTree(DirectoryTree):
@@ -27,25 +28,36 @@ class CsvExplorer(App):
     }
     """
 
+    def on_tree_node_highlighted(self, highlighted: DirectoryTree.NodeHighlighted):
+        path: Path = highlighted.node.data.path
+        if path.suffix == ".csv":
+            parent: ListView = self.query_one("#metadata")
+            csv = duckdb.read_csv(path)
+            parent.clear()
+            parent.append(ListItem(Label(str(path.name))))
+            for header in csv.columns:
+                parent.append(ListItem(Label(str(header))))
+
     def on_directory_tree_file_selected(self, file: DirectoryTree.FileSelected):
         if file.path.suffix == ".csv":
-            if self.currently_displayed_file == file.path:
-                return
-            log(f"Selected: {file.path}")
-            with open(file.path, "r") as fp:
-                self.currently_displayed_file = file.path
-                rows = [row.split(",") for row in fp.readlines()]
-                log(rows)
             table = self.query_one(DataTable)
-            table.add_columns(*rows[0])
-            table.add_rows(rows[1:])
+            table.clear(columns=True)
+            csv = duckdb.read_csv(file.path)
+            rows: duckdb.DuckDBPyRelation = csv.select("*").fetchall()
+            headers = csv.columns
+            table.add_columns(*headers)
+            for row in rows:
+                if isinstance(row[0], datetime):
+                    table.add_row(row[0].strftime("%Y-%b-%d %H:%M"), *row[1:])
+                else:
+                    table.add_row(*row)
 
     def compose(self) -> ComposeResult:
         yield Header(id="header")
         with Horizontal():
             with Vertical():
                 yield CsvDirectoryTree(id="dir-viewer", path="./")
-                yield Static("Placehholder")
+                yield ListView(id="metadata")
             yield DataTable(id="csv-viewer")
 
 
